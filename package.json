@@ -1,0 +1,28 @@
+{
+  "name": "urn",
+  "version": "0.1.0",
+  "description": "Collect, normalize, redact, and query local work activity for AI agents",
+  "type": "module",
+  "bin": {
+    "urn": "dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "pnpm test:unit && pnpm test:e2e",
+    "test:unit": "pnpm build && node --test tests/unit/*.test.mjs",
+    "test:e2e": "pnpm build && node --test tests/e2e/*.test.mjs"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.4.1",
+    "commander": "^14.0.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.7.2",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -1,0 +1,182 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const CLI_PATH = path.join(PROJECT_ROOT, "dist", "cli", "index.js");
+
+function writeFile(filePath, content) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, content);
+}
+
+function sqlite(dbPath, sql) {
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  execFileSync("sqlite3", [dbPath, sql], { stdio: "pipe" });
+}
+
+test("ingest and query merge agent sessions and shell history into normalized events", () => {
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "urn-e2e-"));
+  const dbPath = path.join(tempHome, "urn.db");
+
+  const claudeFile = path.join(
+    tempHome,
+    ".claude",
+    "projects",
+    "-Users-test-demo",
+    "claude-session.jsonl",
+  );
+  writeFile(
+    claudeFile,
+    [
+      JSON.stringify({
+        type: "user",
+        message: { content: "Claude user prompt with sk-1234567890abcdefghijkl" },
+        timestamp: "2026-04-13T01:00:00.000Z",
+        cwd: "/Users/test/demo",
+      }),
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "text", text: "Claude answer" }] },
+        timestamp: "2026-04-13T01:01:00.000Z",
+        cwd: "/Users/test/demo",
+      }),
+      "",
+    ].join("\n"),
+  );
+  fs.utimesSync(claudeFile, new Date("2026-04-13T01:00:00.000Z"), new Date("2026-04-13T01:01:00.000Z"));
+
+  fs.writeFileSync(
+    path.join(tempHome, ".zsh_history"),
+    ": 1776042000:0;git status\n: 1776042060:0;echo hello\n",
+  );
+  fs.utimesSync(
+    path.join(tempHome, ".zsh_history"),
+    new Date("2026-04-13T01:00:00.000Z"),
+    new Date("2026-04-13T01:05:00.000Z"),
+  );
+
+  const codexRollout = path.join(
+    tempHome,
+    ".codex",
+    "sessions",
+    "2026",
+    "04",
+    "13",
+    "rollout-2026-04-13-thread-1.jsonl",
+  );
+  writeFile(
+    codexRollout,
+    [
+      JSON.stringify({
+        timestamp: "2026-04-13T02:00:01.000Z",
+        type: "response_item",
+        payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Codex request" }] },
+      }),
+      JSON.stringify({
+        timestamp: "2026-04-13T02:00:02.000Z",
+        type: "response_item",
+        payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Codex answer" }] },
+      }),
+      "",
+    ].join("\n"),
+  );
+
+  const codexDb = path.join(tempHome, ".codex", "state_5.sqlite");
+  sqlite(
+    codexDb,
+    `
+      CREATE TABLE threads (
+        id TEXT PRIMARY KEY,
+        rollout_path TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        cwd TEXT NOT NULL,
+        title TEXT NOT NULL,
+        first_user_message TEXT NOT NULL DEFAULT ''
+      );
+      INSERT INTO threads (id, rollout_path, updated_at, cwd, title, first_user_message)
+      VALUES ('thread-1', '${codexRollout.replace(/'/g, "''")}', 1776045602, '/Users/test/codex-project', '', 'Codex request');
+    `,
+  );
+
+  execFileSync("node", [CLI_PATH, "ingest", "--source", "all", "--day", "2026-04-13"], {
+    cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      HOME: tempHome,
+      AI_SESSION_VIEWER_HOME: tempHome,
+      URN_DB_PATH: dbPath,
+      URN_NODE_ID: "local:test",
+    },
+    encoding: "utf-8",
+  });
+
+  const output = execFileSync("node", [CLI_PATH, "query", "--day", "2026-04-13", "--format", "json"], {
+    cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      HOME: tempHome,
+      AI_SESSION_VIEWER_HOME: tempHome,
+      URN_DB_PATH: dbPath,
+      URN_NODE_ID: "local:test",
+    },
+    encoding: "utf-8",
+  });
+
+  const rows = JSON.parse(output);
+  assert.equal(rows.length, 6);
+  assert.equal(rows.some((row) => row.sourceApp === "claude"), true);
+  assert.equal(rows.some((row) => row.sourceApp === "codex"), true);
+  assert.equal(rows.some((row) => row.sourceApp === "zsh"), true);
+  const claudePrompt = rows.find((row) => row.sourceApp === "claude" && row.actor === "user");
+  assert.match(claudePrompt.contentRedacted, /\*\*\*\*/);
+  assert.equal(claudePrompt.cwd, "/Users/test/demo");
+});
+
+test("query supports jsonl and csv output", () => {
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "urn-e2e-format-"));
+  const dbPath = path.join(tempHome, "urn.db");
+
+  fs.writeFileSync(
+    path.join(tempHome, ".zsh_history"),
+    ": 1776038400:0;git status\n",
+  );
+
+  execFileSync("node", [CLI_PATH, "ingest", "--source", "zsh", "--day", "2026-04-13"], {
+    cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      HOME: tempHome,
+      URN_DB_PATH: dbPath,
+    },
+    encoding: "utf-8",
+  });
+
+  const jsonl = execFileSync("node", [CLI_PATH, "query", "--source", "shell_history", "--day", "2026-04-13", "--format", "jsonl"], {
+    cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      HOME: tempHome,
+      URN_DB_PATH: dbPath,
+    },
+    encoding: "utf-8",
+  }).trim();
+
+  const csv = execFileSync("node", [CLI_PATH, "query", "--source", "shell_history", "--day", "2026-04-13", "--format", "csv"], {
+    cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      HOME: tempHome,
+      URN_DB_PATH: dbPath,
+    },
+    encoding: "utf-8",
+  }).trim();
+
+  assert.equal(JSON.parse(jsonl).contentRedacted, "git status");
+  assert.match(csv, /occurredAt,sourceType,sourceApp,eventKind,actor,cwd,title,contentRedacted/);
+  assert.match(csv, /git status/);
+});
