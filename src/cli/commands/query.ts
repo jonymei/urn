@@ -4,7 +4,7 @@ import { EventRepo } from "../../core/storage/event-repo.js";
 import { EventQueryService } from "../../core/query/event-query-service.js";
 import { formatEventsCsv, formatEventsJsonl, formatEventsTable, formatEventsTsv } from "../../core/query/export-service.js";
 import { renderJson } from "../output.js";
-import { parseWindowFromOptions, windowToFilter } from "../index.js";
+import { describeWindow, parseWindowFromOptions, windowToFilter } from "../index.js";
 
 export function createQueryCommand(): Command {
   return new Command("query")
@@ -43,7 +43,10 @@ export function createQueryCommand(): Command {
           console.log(formatEventsTsv(events));
           break;
         case "table":
-          console.log(formatEventsTable(events));
+          console.log([
+            `Window: ${describeWindow(window, options)}`,
+            formatEventsTable(events),
+          ].join("\n"));
           break;
         default:
           throw new Error(`Unknown format: ${options.format}`);

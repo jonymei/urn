@@ -624,7 +624,50 @@ test("narrow terminals degrade tables and empty windows use consistent messages"
   assert.match(narrowQuery, /App/);
   assert.match(narrowQuery, /Content/);
   assert.doesNotMatch(narrowQuery, /\bCWD\b/);
-  assert.equal(emptyQuery, "No events found for the selected window.");
-  assert.equal(emptyStats, "No events found for the selected window.");
-  assert.equal(emptySummary, "No events found for the selected window.");
+  assert.equal(emptyQuery, "Window: day 2026-04-14 (Asia/Shanghai)\nNo events found for the selected window.");
+  assert.equal(emptyStats, "Window: day 2026-04-14 (Asia/Shanghai)\nNo events found for the selected window.");
+  assert.equal(emptySummary, "Window: day 2026-04-14 (Asia/Shanghai)\nNo events found for the selected window.");
+});
+
+test("default human output explains implicit day selection", () => {
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "urn-e2e-default-window-"));
+  const dbPath = path.join(tempHome, "urn.db");
+  const env = {
+    ...process.env,
+    HOME: tempHome,
+    URN_DB_PATH: dbPath,
+    TZ: "UTC",
+  };
+
+  const queryOutput = execFileSync("node", [CLI_PATH, "query", "--timezone", "UTC"], {
+    cwd: PROJECT_ROOT,
+    env,
+    encoding: "utf-8",
+  });
+  const statsOutput = execFileSync("node", [CLI_PATH, "stats", "--timezone", "UTC"], {
+    cwd: PROJECT_ROOT,
+    env,
+    encoding: "utf-8",
+  });
+  const summaryOutput = execFileSync("node", [CLI_PATH, "summary", "--timezone", "UTC"], {
+    cwd: PROJECT_ROOT,
+    env,
+    encoding: "utf-8",
+  });
+
+  assert.match(queryOutput, /^Window: day \d{4}-\d{2}-\d{2} \(UTC, defaulted to today\)/);
+  assert.match(statsOutput, /^Window: day \d{4}-\d{2}-\d{2} \(UTC, defaulted to today\)/);
+  assert.match(summaryOutput, /^Window: day \d{4}-\d{2}-\d{2} \(UTC, defaulted to today\)/);
+});
+
+test("bin wrapper shows help output", () => {
+  const helpOutput = execFileSync("node", [path.join(PROJECT_ROOT, "src", "bin", "urn.js"), "-h"], {
+    cwd: PROJECT_ROOT,
+    env: process.env,
+    encoding: "utf-8",
+  });
+
+  assert.match(helpOutput, /Usage: urn/);
+  assert.match(helpOutput, /Commands:/);
+  assert.match(helpOutput, /query \[options\]/);
 });

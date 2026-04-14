@@ -3,7 +3,7 @@ import { openDatabase } from "../../core/storage/db.js";
 import { EventRepo } from "../../core/storage/event-repo.js";
 import { EventQueryService } from "../../core/query/event-query-service.js";
 import { renderEmptyState, renderJson, renderTable } from "../output.js";
-import { parseWindowFromOptions, windowToFilter } from "../index.js";
+import { describeWindow, parseWindowFromOptions, windowToFilter } from "../index.js";
 
 function truncate(text: string, max = 120): string {
   const normalized = text.replace(/\s+/g, " ").trim();
@@ -25,8 +25,9 @@ export function createSummaryCommand(): Command {
     .action((options) => {
       const db = openDatabase();
       const service = new EventQueryService(new EventRepo(db));
+      const window = parseWindowFromOptions(options);
       const filter = {
-        ...windowToFilter(parseWindowFromOptions(options)),
+        ...windowToFilter(window),
         sourceType: options.source,
         sourceApp: options.app,
       };
@@ -85,12 +86,15 @@ export function createSummaryCommand(): Command {
         console.log(renderJson(summary));
       } else if (options.format === "text") {
         if (stats.totalEvents === 0) {
-          console.log(renderEmptyState("No events found for the selected window."));
+          console.log([
+            `Window: ${describeWindow(window, options)}`,
+            renderEmptyState("No events found for the selected window."),
+          ].join("\n"));
           db.close();
           return;
         }
         const lines = [
-          `Window: ${filter.start} -> ${filter.end}`,
+          `Window: ${describeWindow(window, options)}`,
           `Events: ${stats.totalEvents}`,
           `Raw Records: ${stats.totalRawRecords}`,
           "",
