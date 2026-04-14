@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { openDatabase } from "../../core/storage/db.js";
 import { EventRepo } from "../../core/storage/event-repo.js";
 import { EventQueryService } from "../../core/query/event-query-service.js";
+import { renderEmptyState, renderJson, renderTable } from "../output.js";
 import { parseWindowFromOptions, windowToFilter } from "../index.js";
 
 function truncate(text: string, max = 120): string {
@@ -20,6 +21,7 @@ export function createSummaryCommand(): Command {
     .option("--recent <value>", "Recent window, for example 12h or 7d")
     .option("--timezone <tz>", "Timezone label", Intl.DateTimeFormat().resolvedOptions().timeZone)
     .option("--limit <n>", "Representative event count", "8")
+    .option("--format <format>", "Output format: text, json", "text")
     .action((options) => {
       const db = openDatabase();
       const service = new EventQueryService(new EventRepo(db));
@@ -67,7 +69,7 @@ export function createSummaryCommand(): Command {
           content: truncate(event.contentRedacted),
         }));
 
-      console.log(JSON.stringify({
+      const summary = {
         window: filter,
         totals: {
           events: stats.totalEvents,
@@ -77,7 +79,67 @@ export function createSummaryCommand(): Command {
         topCwds,
         topTitles,
         representativeEvents,
-      }, null, 2));
+      };
+
+      if (options.format === "json") {
+        console.log(renderJson(summary));
+      } else if (options.format === "text") {
+        if (stats.totalEvents === 0) {
+          console.log(renderEmptyState("No events found for the selected window."));
+          db.close();
+          return;
+        }
+        const lines = [
+          `Window: ${filter.start} -> ${filter.end}`,
+          `Events: ${stats.totalEvents}`,
+          `Raw Records: ${stats.totalRawRecords}`,
+          "",
+          "By Source App",
+          renderTable({
+            columns: [
+              { key: "key", header: "App", maxWidth: 20, required: true },
+              { key: "count", header: "Count", align: "right", maxWidth: 12 },
+            ],
+            rows: stats.bySourceApp,
+          }),
+          "",
+          "Top CWDs",
+          renderTable({
+            columns: [
+              { key: "cwd", header: "CWD", maxWidth: 48, minWidth: 12, required: true },
+              { key: "count", header: "Count", align: "right", maxWidth: 12 },
+            ],
+            rows: topCwds,
+            emptyMessage: "No directories found.",
+          }),
+          "",
+          "Top Titles",
+          renderTable({
+            columns: [
+              { key: "title", header: "Title", maxWidth: 48, minWidth: 12, required: true },
+              { key: "count", header: "Count", align: "right", maxWidth: 12 },
+            ],
+            rows: topTitles,
+            emptyMessage: "No titles found.",
+          }),
+          "",
+          "Representative Events",
+          renderTable({
+            columns: [
+              { key: "occurredAt", header: "Time", maxWidth: 24, minWidth: 19, required: true },
+              { key: "sourceApp", header: "App", maxWidth: 16, minWidth: 6, required: true },
+              { key: "cwd", header: "CWD", maxWidth: 28, minWidth: 8, priority: 3 },
+              { key: "title", header: "Title", maxWidth: 28, minWidth: 8, priority: 2 },
+              { key: "content", header: "Content", maxWidth: 48, minWidth: 12, priority: 1, required: true },
+            ],
+            rows: representativeEvents,
+            emptyMessage: "No representative events found.",
+          }),
+        ];
+        console.log(lines.join("\n"));
+      } else {
+        throw new Error(`Unknown format: ${options.format}`);
+      }
       db.close();
     });
 }

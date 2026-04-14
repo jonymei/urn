@@ -36,6 +36,9 @@ urn sync --include-shell
 urn query --source all --day 2026-04-14
 urn stats --recent 30d
 urn summary --start 2026-04-11T00:00:00 --end 2026-04-12T23:59:59
+urn sync --format json
+urn stats --recent 30d --format json
+urn summary --day 2026-04-14 --format json
 urn query --start 2026-04-14T00:00:00 --end 2026-04-14T23:59:59 --format json
 urn query --day 2026-04-14 --format jsonl
 urn query --day 2026-04-14 --format csv
@@ -44,7 +47,11 @@ urn nodes list
 ```
 
 推荐的每日同步策略见 [docs/ingest-strategy.md](./docs/ingest-strategy.md)。
+CLI 输出与格式约定见 [docs/cli-design.md](./docs/cli-design.md)。
 如果需要每隔 1 小时近实时同步，优先使用 `sync`。
+
+默认输出面向人类阅读。
+如果需要给脚本、Agent 或管道消费，请显式加 `--format json`、`--format jsonl`、`--format csv` 或 `--format tsv`。
 
 默认数据库位置：
 

@@ -7,6 +7,7 @@ import { CursorRepo } from "../../core/storage/cursor-repo.js";
 import type { FetchWindow } from "../../core/types/query.js";
 import type { SourceFetcher } from "../../core/types/fetch.js";
 import { getWindowBounds } from "../../shared/time.js";
+import { renderEmptyState, renderJson, renderTable } from "../output.js";
 
 interface SyncBatchSummary {
   label: string;
@@ -45,6 +46,7 @@ export function createSyncCommand(): Command {
     .option("--browser-days <n>", "Replay window for browser history", "1")
     .option("--include-shell", "Include shell history replay", false)
     .option("--shell-hours <n>", "Replay window for shell history", "24")
+    .option("--format <format>", "Output format: text, json", "text")
     .action((options) => {
       if (options.profile !== "hourly") {
         throw new Error(`Unknown sync profile: ${options.profile}`);
@@ -120,7 +122,7 @@ export function createSyncCommand(): Command {
         }
       }
 
-      console.log(JSON.stringify({
+      const output = {
         profile: "hourly",
         timezone,
         batches: batches.map((batch) => ({
@@ -133,7 +135,49 @@ export function createSyncCommand(): Command {
             : undefined,
         })),
         totals: sumResults(batches),
-      }, null, 2));
+      };
+      if (options.format === "json") {
+        console.log(renderJson(output));
+      } else if (options.format === "text") {
+        if (output.batches.length === 0) {
+          console.log(renderEmptyState("No batches available for this sync run."));
+          db.close();
+          return;
+        }
+        console.log([
+          `Profile: hourly`,
+          `Timezone: ${timezone}`,
+          "",
+          renderTable({
+            columns: [
+              { key: "label", header: "Batch", maxWidth: 24, minWidth: 8, required: true },
+              { key: "mode", header: "Mode", maxWidth: 12, minWidth: 6, priority: 1 },
+              { key: "window", header: "Window", maxWidth: 36, minWidth: 10, priority: 2 },
+              { key: "rawRecordsRead", header: "Read", align: "right", maxWidth: 10 },
+              { key: "rawRecordsInserted", header: "Raw+", align: "right", maxWidth: 10 },
+              { key: "eventsInserted", header: "Events+", align: "right", maxWidth: 10 },
+            ],
+            rows: output.batches.map((batch) => ({
+              label: batch.label,
+              mode: batch.mode,
+              window: batch.window
+                ? batch.window.kind === "recent"
+                  ? `${batch.window.amount} ${batch.window.unit}`
+                  : batch.window.kind === "day"
+                    ? batch.window.date
+                    : `${batch.window.start} -> ${batch.window.end}`
+                : "-",
+              rawRecordsRead: batch.result.rawRecordsRead,
+              rawRecordsInserted: batch.result.rawRecordsInserted,
+              eventsInserted: batch.result.eventsInserted,
+            })),
+          }),
+          "",
+          `Totals: read=${output.totals.rawRecordsRead} raw+=${output.totals.rawRecordsInserted} events+=${output.totals.eventsInserted}`,
+        ].join("\n"));
+      } else {
+        throw new Error(`Unknown format: ${options.format}`);
+      }
       db.close();
     });
 }

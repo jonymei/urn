@@ -2,7 +2,8 @@ import { Command } from "commander";
 import { openDatabase } from "../../core/storage/db.js";
 import { EventRepo } from "../../core/storage/event-repo.js";
 import { EventQueryService } from "../../core/query/event-query-service.js";
-import { formatEventsCsv, formatEventsJsonl, formatEventsTable } from "../../core/query/export-service.js";
+import { formatEventsCsv, formatEventsJsonl, formatEventsTable, formatEventsTsv } from "../../core/query/export-service.js";
+import { renderJson } from "../output.js";
 import { parseWindowFromOptions, windowToFilter } from "../index.js";
 
 export function createQueryCommand(): Command {
@@ -16,7 +17,7 @@ export function createQueryCommand(): Command {
     .option("--recent <value>", "Recent window, for example 12h or 7d")
     .option("--timezone <tz>", "Timezone label", Intl.DateTimeFormat().resolvedOptions().timeZone)
     .option("--limit <n>", "Limit rows")
-    .option("--format <format>", "Output format: table, json, jsonl, csv", "table")
+    .option("--format <format>", "Output format: table, json, jsonl, csv, tsv", "table")
     .action((options) => {
       const db = openDatabase();
       const eventRepo = new EventRepo(db);
@@ -30,13 +31,16 @@ export function createQueryCommand(): Command {
       });
       switch (options.format) {
         case "json":
-          console.log(JSON.stringify(events, null, 2));
+          console.log(renderJson(events));
           break;
         case "jsonl":
           console.log(formatEventsJsonl(events));
           break;
         case "csv":
           console.log(formatEventsCsv(events));
+          break;
+        case "tsv":
+          console.log(formatEventsTsv(events));
           break;
         case "table":
           console.log(formatEventsTable(events));

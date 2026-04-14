@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { openDatabase } from "../../core/storage/db.js";
 import { EventRepo } from "../../core/storage/event-repo.js";
 import { EventQueryService } from "../../core/query/event-query-service.js";
+import { renderEmptyState, renderJson, renderTable } from "../output.js";
 import { parseWindowFromOptions, windowToFilter } from "../index.js";
 
 export function createStatsCommand(): Command {
@@ -14,6 +15,7 @@ export function createStatsCommand(): Command {
     .option("--end <datetime>", "Range end")
     .option("--recent <value>", "Recent window, for example 12h or 7d")
     .option("--timezone <tz>", "Timezone label", Intl.DateTimeFormat().resolvedOptions().timeZone)
+    .option("--format <format>", "Output format: table, json", "table")
     .action((options) => {
       const db = openDatabase();
       const service = new EventQueryService(new EventRepo(db));
@@ -22,7 +24,58 @@ export function createStatsCommand(): Command {
         sourceType: options.source,
         sourceApp: options.app,
       });
-      console.log(JSON.stringify(stats, null, 2));
+      if (options.format === "json") {
+        console.log(renderJson(stats));
+      } else if (options.format === "table") {
+        if (stats.totalEvents === 0) {
+          console.log(renderEmptyState("No events found for the selected window."));
+          db.close();
+          return;
+        }
+        const sections = [
+          "Totals",
+          renderTable({
+            columns: [
+              { key: "label", header: "Metric", maxWidth: 18, required: true },
+              { key: "value", header: "Value", align: "right", maxWidth: 12 },
+            ],
+            rows: [
+              { label: "Events", value: stats.totalEvents },
+              { label: "Raw Records", value: stats.totalRawRecords },
+            ],
+          }),
+          "",
+          "By Source App",
+          renderTable({
+            columns: [
+              { key: "key", header: "App", maxWidth: 20, required: true },
+              { key: "count", header: "Count", align: "right", maxWidth: 12 },
+            ],
+            rows: stats.bySourceApp,
+          }),
+          "",
+          "By Source Type",
+          renderTable({
+            columns: [
+              { key: "key", header: "Source Type", maxWidth: 20, required: true },
+              { key: "count", header: "Count", align: "right", maxWidth: 12 },
+            ],
+            rows: stats.bySourceType,
+          }),
+          "",
+          "By Day",
+          renderTable({
+            columns: [
+              { key: "key", header: "Day", maxWidth: 12, required: true },
+              { key: "count", header: "Count", align: "right", maxWidth: 12 },
+            ],
+            rows: stats.byDay,
+          }),
+        ];
+        console.log(sections.join("\n"));
+      } else {
+        throw new Error(`Unknown format: ${options.format}`);
+      }
       db.close();
     });
 }

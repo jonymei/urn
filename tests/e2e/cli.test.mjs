@@ -243,7 +243,7 @@ test("daily ingest profile prioritizes agent sessions, replays browser history, 
     `,
   );
 
-  const profileOutput = execFileSync("node", [CLI_PATH, "ingest", "--profile", "daily", "--day", "2026-04-13"], {
+  const profileOutput = execFileSync("node", [CLI_PATH, "ingest", "--profile", "daily", "--day", "2026-04-13", "--format", "json"], {
     cwd: PROJECT_ROOT,
     env: {
       ...process.env,
@@ -380,12 +380,12 @@ test("hourly sync uses cursors for agent sessions and replay windows for browser
     URN_NODE_ID: "local:test",
   };
 
-  const firstSync = JSON.parse(execFileSync("node", [CLI_PATH, "sync"], {
+  const firstSync = JSON.parse(execFileSync("node", [CLI_PATH, "sync", "--format", "json"], {
     cwd: PROJECT_ROOT,
     env,
     encoding: "utf-8",
   }));
-  const secondSync = JSON.parse(execFileSync("node", [CLI_PATH, "sync"], {
+  const secondSync = JSON.parse(execFileSync("node", [CLI_PATH, "sync", "--format", "json"], {
     cwd: PROJECT_ROOT,
     env,
     encoding: "utf-8",
@@ -453,7 +453,7 @@ test("stats and summary expose aggregate and summary views", () => {
     encoding: "utf-8",
   });
 
-  const stats = JSON.parse(execFileSync("node", [CLI_PATH, "stats", "--day", "2026-04-13"], {
+  const stats = JSON.parse(execFileSync("node", [CLI_PATH, "stats", "--day", "2026-04-13", "--format", "json"], {
     cwd: PROJECT_ROOT,
     env: {
       ...process.env,
@@ -464,7 +464,7 @@ test("stats and summary expose aggregate and summary views", () => {
     encoding: "utf-8",
   }));
 
-  const summary = JSON.parse(execFileSync("node", [CLI_PATH, "summary", "--day", "2026-04-13"], {
+  const summary = JSON.parse(execFileSync("node", [CLI_PATH, "summary", "--day", "2026-04-13", "--format", "json"], {
     cwd: PROJECT_ROOT,
     env: {
       ...process.env,
@@ -482,4 +482,149 @@ test("stats and summary expose aggregate and summary views", () => {
   assert.equal(summary.topCwds[0].cwd, "/Users/test/summary");
   assert.equal(summary.topTitles[0].title, "summary prompt");
   assert.equal(summary.representativeEvents[0].content, "summary prompt");
+});
+
+test("default outputs are human friendly and keep CJK visible", () => {
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "urn-e2e-human-"));
+  const dbPath = path.join(tempHome, "urn.db");
+
+  const claudeFile = path.join(
+    tempHome,
+    ".claude",
+    "projects",
+    "-Users-test-human",
+    "claude-session.jsonl",
+  );
+  writeFile(
+    claudeFile,
+    [
+      JSON.stringify({
+        type: "user",
+        message: { content: "整理中文输出体验" },
+        timestamp: "2026-04-13T08:00:00.000Z",
+        cwd: "/Users/test/中文项目",
+      }),
+      "",
+    ].join("\n"),
+  );
+  fs.utimesSync(claudeFile, new Date("2026-04-13T08:00:00.000Z"), new Date("2026-04-13T08:00:00.000Z"));
+
+  execFileSync("node", [CLI_PATH, "ingest", "--source", "claude", "--day", "2026-04-13"], {
+    cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      HOME: tempHome,
+      AI_SESSION_VIEWER_HOME: tempHome,
+      URN_DB_PATH: dbPath,
+    },
+    encoding: "utf-8",
+  });
+
+  const queryTable = execFileSync("node", [CLI_PATH, "query", "--day", "2026-04-13"], {
+    cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      HOME: tempHome,
+      AI_SESSION_VIEWER_HOME: tempHome,
+      URN_DB_PATH: dbPath,
+    },
+    encoding: "utf-8",
+  });
+  const statsTable = execFileSync("node", [CLI_PATH, "stats", "--day", "2026-04-13"], {
+    cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      HOME: tempHome,
+      AI_SESSION_VIEWER_HOME: tempHome,
+      URN_DB_PATH: dbPath,
+    },
+    encoding: "utf-8",
+  });
+  const summaryText = execFileSync("node", [CLI_PATH, "summary", "--day", "2026-04-13"], {
+    cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      HOME: tempHome,
+      AI_SESSION_VIEWER_HOME: tempHome,
+      URN_DB_PATH: dbPath,
+    },
+    encoding: "utf-8",
+  });
+
+  assert.match(queryTable, /Time\s+App\s+Actor\s+Kind/);
+  assert.match(queryTable, /中文项目/);
+  assert.match(queryTable, /整理中文输出体验/);
+  assert.match(statsTable, /Totals/);
+  assert.match(statsTable, /By Source App/);
+  assert.match(summaryText, /Representative Events/);
+  assert.match(summaryText, /整理中文输出体验/);
+});
+
+test("narrow terminals degrade tables and empty windows use consistent messages", () => {
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "urn-e2e-narrow-"));
+  const dbPath = path.join(tempHome, "urn.db");
+
+  const claudeFile = path.join(
+    tempHome,
+    ".claude",
+    "projects",
+    "-Users-test-narrow",
+    "claude-session.jsonl",
+  );
+  writeFile(
+    claudeFile,
+    [
+      JSON.stringify({
+        type: "user",
+        message: { content: "检查窄终端下的中文表格输出" },
+        timestamp: "2026-04-13T08:00:00.000Z",
+        cwd: "/Users/test/超长中文项目路径/内部目录",
+      }),
+      "",
+    ].join("\n"),
+  );
+  fs.utimesSync(claudeFile, new Date("2026-04-13T08:00:00.000Z"), new Date("2026-04-13T08:00:00.000Z"));
+
+  const env = {
+    ...process.env,
+    HOME: tempHome,
+    AI_SESSION_VIEWER_HOME: tempHome,
+    URN_DB_PATH: dbPath,
+    COLUMNS: "32",
+  };
+
+  execFileSync("node", [CLI_PATH, "ingest", "--source", "claude", "--day", "2026-04-13"], {
+    cwd: PROJECT_ROOT,
+    env,
+    encoding: "utf-8",
+  });
+
+  const narrowQuery = execFileSync("node", [CLI_PATH, "query", "--day", "2026-04-13"], {
+    cwd: PROJECT_ROOT,
+    env,
+    encoding: "utf-8",
+  });
+  const emptyQuery = execFileSync("node", [CLI_PATH, "query", "--day", "2026-04-14"], {
+    cwd: PROJECT_ROOT,
+    env,
+    encoding: "utf-8",
+  }).trim();
+  const emptyStats = execFileSync("node", [CLI_PATH, "stats", "--day", "2026-04-14"], {
+    cwd: PROJECT_ROOT,
+    env,
+    encoding: "utf-8",
+  }).trim();
+  const emptySummary = execFileSync("node", [CLI_PATH, "summary", "--day", "2026-04-14"], {
+    cwd: PROJECT_ROOT,
+    env,
+    encoding: "utf-8",
+  }).trim();
+
+  assert.match(narrowQuery, /Time/);
+  assert.match(narrowQuery, /App/);
+  assert.match(narrowQuery, /Content/);
+  assert.doesNotMatch(narrowQuery, /\bCWD\b/);
+  assert.equal(emptyQuery, "No events found for the selected window.");
+  assert.equal(emptyStats, "No events found for the selected window.");
+  assert.equal(emptySummary, "No events found for the selected window.");
 });

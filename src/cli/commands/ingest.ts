@@ -6,6 +6,7 @@ import { resolveNodeId } from "../../shared/path.js";
 import type { SourceFetcher } from "../../core/types/fetch.js";
 import type { FetchWindow } from "../../core/types/query.js";
 import { getWindowBounds } from "../../shared/time.js";
+import { renderEmptyState, renderJson, renderTable } from "../output.js";
 
 interface IngestBatchSummary {
   label: string;
@@ -99,6 +100,7 @@ export function createIngestCommand(): Command {
     .option("--recent <value>", "Recent window, for example 12h or 7d")
     .option("--timezone <tz>", "Timezone label", Intl.DateTimeFormat().resolvedOptions().timeZone)
     .option("--include-shell", "Include shell history in profile runs", false)
+    .option("--format <format>", "Output format: text, json", "text")
     .action((options) => {
       const db = openDatabase();
       const registry = createRegistry();
@@ -119,7 +121,7 @@ export function createIngestCommand(): Command {
         const batches = createDailyProfile(registry, timezone, day, Boolean(options.includeShell))
           .map((batch) => runBatch(pipeline, batch.fetchers, batch.label, batch.window));
 
-        console.log(JSON.stringify({
+        const output = {
           profile: "daily",
           day,
           timezone,
@@ -131,20 +133,85 @@ export function createIngestCommand(): Command {
             },
           })),
           totals: sumResults(batches),
-        }, null, 2));
+        };
+        if (options.format === "json") {
+          console.log(renderJson(output));
+        } else if (options.format === "text") {
+          if (batches.length === 0) {
+            console.log(renderEmptyState("No batches available for this ingest run."));
+            db.close();
+            return;
+          }
+          console.log([
+            `Profile: daily`,
+            `Day: ${day}`,
+            `Timezone: ${timezone}`,
+            "",
+            renderTable({
+              columns: [
+                { key: "label", header: "Batch", maxWidth: 20, minWidth: 8, required: true },
+                { key: "mode", header: "Window", maxWidth: 36, minWidth: 12, priority: 1 },
+                { key: "rawRecordsRead", header: "Read", align: "right", maxWidth: 10 },
+                { key: "rawRecordsInserted", header: "Raw+", align: "right", maxWidth: 10 },
+                { key: "eventsInserted", header: "Events+", align: "right", maxWidth: 10 },
+              ],
+              rows: batches.map((batch) => ({
+                label: batch.label,
+                mode: batch.window.kind === "day"
+                  ? `${batch.window.date} (${batch.window.timezone})`
+                  : batch.window.kind === "recent"
+                    ? `recent ${batch.window.amount} ${batch.window.unit}`
+                    : `${batch.window.start} -> ${batch.window.end}`,
+                rawRecordsRead: batch.result.rawRecordsRead,
+                rawRecordsInserted: batch.result.rawRecordsInserted,
+                eventsInserted: batch.result.eventsInserted,
+              })),
+            }),
+            "",
+            `Totals: read=${output.totals.rawRecordsRead} raw+=${output.totals.rawRecordsInserted} events+=${output.totals.eventsInserted}`,
+          ].join("\n"));
+        } else {
+          throw new Error(`Unknown format: ${options.format}`);
+        }
         db.close();
         return;
       }
 
       const window = parseWindowFromOptions(options);
       const result = pipeline.run(registry.resolveMany(options.source), window);
-      console.log(JSON.stringify({
+      const output = {
         ...result,
         window: {
           ...window,
           bounds: getWindowBounds(window),
         },
-      }, null, 2));
+      };
+      if (options.format === "json") {
+        console.log(renderJson(output));
+      } else if (options.format === "text") {
+        const windowLabel = window.kind === "day"
+          ? `${window.date} (${window.timezone})`
+          : window.kind === "recent"
+            ? `recent ${window.amount} ${window.unit} (${window.timezone})`
+            : `${window.start} -> ${window.end}`;
+        console.log([
+          `Ingest complete`,
+          `Window: ${windowLabel}`,
+          renderTable({
+            columns: [
+              { key: "label", header: "Metric", maxWidth: 20, required: true },
+              { key: "value", header: "Value", align: "right", maxWidth: 12 },
+            ],
+            rows: [
+              { label: "Raw Records Read", value: output.rawRecordsRead },
+              { label: "Raw Records Added", value: output.rawRecordsInserted },
+              { label: "Events Added", value: output.eventsInserted },
+            ],
+          }),
+        ].join("\n"));
+      } else {
+        throw new Error(`Unknown format: ${options.format}`);
+      }
       db.close();
     });
 }
