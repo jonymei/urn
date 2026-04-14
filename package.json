@@ -1,6 +1,6 @@
 {
   "name": "@jonymei/urn-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Collect, normalize, redact, and query local work activity for AI agents",
   "license": "MIT",
   "type": "module",
