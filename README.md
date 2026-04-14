@@ -38,6 +38,21 @@
 
 ## 安装
 
+全局安装：
+
+```bash
+npm install -g @jonymei/urn-cli
+urn --help
+```
+
+临时执行：
+
+```bash
+npx @jonymei/urn-cli --help
+```
+
+从源码安装：
+
 ```bash
 cd /path/to/urn
 pnpm install

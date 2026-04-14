@@ -1,9 +1,15 @@
 {
-  "name": "urn",
+  "name": "@jonymei/urn-cli",
   "version": "0.1.0",
   "description": "Collect, normalize, redact, and query local work activity for AI agents",
   "license": "MIT",
   "type": "module",
+  "files": [
+    "dist",
+    "src/bin",
+    "README.md",
+    "LICENSE"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jonymei/urn.git"
@@ -15,10 +21,15 @@
   "bin": {
     "urn": "src/bin/urn.js"
   },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "scripts": {
     "build": "tsc",
     "cli": "tsx src/cli/index.ts",
     "dev": "tsc --watch",
+    "prepack": "pnpm build",
     "test": "pnpm test:unit && pnpm test:e2e",
     "test:unit": "pnpm build && node --test tests/unit/*.test.mjs",
     "test:e2e": "pnpm build && node --test tests/e2e/*.test.mjs"
