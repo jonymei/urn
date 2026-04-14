@@ -591,6 +591,7 @@ test("narrow terminals degrade tables and empty windows use consistent messages"
     AI_SESSION_VIEWER_HOME: tempHome,
     URN_DB_PATH: dbPath,
     COLUMNS: "32",
+    TZ: "Asia/Shanghai",
   };
 
   execFileSync("node", [CLI_PATH, "ingest", "--source", "claude", "--day", "2026-04-13"], {
