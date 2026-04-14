@@ -2,6 +2,19 @@ import Database from "better-sqlite3";
 import type { QueryFilter } from "../types/query.js";
 import type { EventRecord } from "../types/event.js";
 
+export interface StatsRow {
+  key: string;
+  count: number;
+}
+
+export interface EventStats {
+  totalEvents: number;
+  totalRawRecords: number;
+  bySourceType: StatsRow[];
+  bySourceApp: StatsRow[];
+  byDay: StatsRow[];
+}
+
 export class EventRepo {
   constructor(private readonly db: Database.Database) {}
 
@@ -96,5 +109,80 @@ export class EventRepo {
   count(): number {
     const row = this.db.prepare("SELECT COUNT(*) AS count FROM events").get() as { count: number };
     return row.count;
+  }
+
+  stats(filter: QueryFilter): EventStats {
+    const clauses = ["1=1"];
+    const params: Record<string, unknown> = {};
+
+    if (filter.sourceType && filter.sourceType !== "all") {
+      clauses.push("e.source_type = @sourceType");
+      params.sourceType = filter.sourceType;
+    }
+
+    if (filter.sourceApp && filter.sourceApp !== "all") {
+      clauses.push("e.source_app = @sourceApp");
+      params.sourceApp = filter.sourceApp;
+    }
+
+    if (filter.nodeId) {
+      clauses.push("e.node_id = @nodeId");
+      params.nodeId = filter.nodeId;
+    }
+
+    if (filter.start) {
+      clauses.push("e.occurred_at >= @start");
+      params.start = filter.start;
+    }
+
+    if (filter.end) {
+      clauses.push("e.occurred_at <= @end");
+      params.end = filter.end;
+    }
+
+    const where = clauses.join(" AND ");
+    const totalEvents = (this.db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM events e
+      WHERE ${where}
+    `).get(params) as { count: number }).count;
+
+    const totalRawRecords = (this.db.prepare(`
+      SELECT COUNT(DISTINCT e.raw_record_id) AS count
+      FROM events e
+      WHERE ${where}
+    `).get(params) as { count: number }).count;
+
+    const bySourceType = this.db.prepare(`
+      SELECT e.source_type AS key, COUNT(*) AS count
+      FROM events e
+      WHERE ${where}
+      GROUP BY e.source_type
+      ORDER BY count DESC, key ASC
+    `).all(params) as StatsRow[];
+
+    const bySourceApp = this.db.prepare(`
+      SELECT e.source_app AS key, COUNT(*) AS count
+      FROM events e
+      WHERE ${where}
+      GROUP BY e.source_app
+      ORDER BY count DESC, key ASC
+    `).all(params) as StatsRow[];
+
+    const byDay = this.db.prepare(`
+      SELECT substr(e.occurred_at, 1, 10) AS key, COUNT(*) AS count
+      FROM events e
+      WHERE ${where}
+      GROUP BY substr(e.occurred_at, 1, 10)
+      ORDER BY key ASC
+    `).all(params) as StatsRow[];
+
+    return {
+      totalEvents,
+      totalRawRecords,
+      bySourceType,
+      bySourceApp,
+      byDay,
+    };
   }
 }

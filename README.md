@@ -28,14 +28,23 @@ pnpm build
 
 ```bash
 urn ingest --source all --day 2026-04-14
-urn ingest --source shell-history --recent 7d
+urn ingest --source zsh --recent 7d
+urn ingest --profile daily
+urn ingest --profile daily --include-shell
+urn sync
+urn sync --include-shell
 urn query --source all --day 2026-04-14
+urn stats --recent 30d
+urn summary --start 2026-04-11T00:00:00 --end 2026-04-12T23:59:59
 urn query --start 2026-04-14T00:00:00 --end 2026-04-14T23:59:59 --format json
 urn query --day 2026-04-14 --format jsonl
 urn query --day 2026-04-14 --format csv
 urn sources list
 urn nodes list
 ```
+
+推荐的每日同步策略见 [docs/ingest-strategy.md](./docs/ingest-strategy.md)。
+如果需要每隔 1 小时近实时同步，优先使用 `sync`。
 
 默认数据库位置：
 

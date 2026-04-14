@@ -3,6 +3,9 @@ import { createIngestCommand } from "./commands/ingest.js";
 import { createNodesCommand } from "./commands/nodes.js";
 import { createQueryCommand } from "./commands/query.js";
 import { createSourcesCommand } from "./commands/sources.js";
+import { createStatsCommand } from "./commands/stats.js";
+import { createSummaryCommand } from "./commands/summary.js";
+import { createSyncCommand } from "./commands/sync.js";
 import { SourceRegistry } from "../core/source-registry/registry.js";
 import type { FetchWindow, QueryFilter } from "../core/types/query.js";
 import { parseRecent, getWindowBounds, toIsoString } from "../shared/time.js";
@@ -64,7 +67,10 @@ export function windowToFilter(window: FetchWindow): QueryFilter {
 const program = new Command();
 program.name("urn").description("Collect and query local work activity");
 program.addCommand(createIngestCommand());
+program.addCommand(createSyncCommand());
 program.addCommand(createQueryCommand());
+program.addCommand(createStatsCommand());
+program.addCommand(createSummaryCommand());
 program.addCommand(createSourcesCommand());
 program.addCommand(createNodesCommand());
 

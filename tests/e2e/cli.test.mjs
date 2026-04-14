@@ -19,6 +19,10 @@ function sqlite(dbPath, sql) {
   execFileSync("sqlite3", [dbPath, sql], { stdio: "pipe" });
 }
 
+function toChromiumVisitTime(iso) {
+  return String(new Date(iso).getTime() * 1000 + 11644473600000000);
+}
+
 test("ingest and query merge agent sessions and shell history into normalized events", () => {
   const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "urn-e2e-"));
   const dbPath = path.join(tempHome, "urn.db");
@@ -115,7 +119,16 @@ test("ingest and query merge agent sessions and shell history into normalized ev
     encoding: "utf-8",
   });
 
-  const output = execFileSync("node", [CLI_PATH, "query", "--day", "2026-04-13", "--format", "json"], {
+  const output = execFileSync("node", [
+    CLI_PATH,
+    "query",
+    "--start",
+    "2026-04-11T00:00:00.000Z",
+    "--end",
+    "2026-04-13T23:59:59.999Z",
+    "--format",
+    "json",
+  ], {
     cwd: PROJECT_ROOT,
     env: {
       ...process.env,
@@ -179,4 +192,294 @@ test("query supports jsonl and csv output", () => {
   assert.equal(JSON.parse(jsonl).contentRedacted, "git status");
   assert.match(csv, /occurredAt,sourceType,sourceApp,eventKind,actor,cwd,title,contentRedacted/);
   assert.match(csv, /git status/);
+});
+
+test("daily ingest profile prioritizes agent sessions, replays browser history, and skips shell by default", () => {
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "urn-e2e-profile-"));
+  const dbPath = path.join(tempHome, "urn.db");
+
+  const claudeFile = path.join(
+    tempHome,
+    ".claude",
+    "projects",
+    "-Users-test-demo",
+    "claude-session.jsonl",
+  );
+  writeFile(
+    claudeFile,
+    [
+      JSON.stringify({
+        type: "user",
+        message: { content: "daily profile prompt" },
+        timestamp: "2026-04-13T08:00:00.000Z",
+        cwd: "/Users/test/demo",
+      }),
+      "",
+    ].join("\n"),
+  );
+  fs.utimesSync(claudeFile, new Date("2026-04-13T08:00:00.000Z"), new Date("2026-04-13T08:00:00.000Z"));
+
+  fs.writeFileSync(
+    path.join(tempHome, ".zsh_history"),
+    ": 1776038400:0;git status\n",
+  );
+
+  const chromeDb = path.join(
+    tempHome,
+    "Library",
+    "Application Support",
+    "Google",
+    "Chrome",
+    "Default",
+    "History",
+  );
+  sqlite(
+    chromeDb,
+    `
+      CREATE TABLE urls (id INTEGER PRIMARY KEY, url TEXT NOT NULL, title TEXT NOT NULL);
+      CREATE TABLE visits (id INTEGER PRIMARY KEY, url INTEGER NOT NULL, visit_time INTEGER NOT NULL);
+      INSERT INTO urls (id, url, title) VALUES (1, 'https://example.com/overlap', 'Overlap Page');
+      INSERT INTO visits (id, url, visit_time) VALUES (1, 1, ${toChromiumVisitTime("2026-04-11T06:00:00.000Z")});
+    `,
+  );
+
+  const profileOutput = execFileSync("node", [CLI_PATH, "ingest", "--profile", "daily", "--day", "2026-04-13"], {
+    cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      HOME: tempHome,
+      AI_SESSION_VIEWER_HOME: tempHome,
+      URN_DB_PATH: dbPath,
+      URN_NODE_ID: "local:test",
+    },
+    encoding: "utf-8",
+  });
+
+  const profile = JSON.parse(profileOutput);
+  assert.equal(profile.profile, "daily");
+  assert.deepEqual(profile.batches.map((batch) => batch.label), ["agent-sessions", "browser-history"]);
+
+  const output = execFileSync("node", [
+    CLI_PATH,
+    "query",
+    "--start",
+    "2026-04-11T00:00:00.000Z",
+    "--end",
+    "2026-04-13T23:59:59.999Z",
+    "--format",
+    "json",
+  ], {
+    cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      HOME: tempHome,
+      AI_SESSION_VIEWER_HOME: tempHome,
+      URN_DB_PATH: dbPath,
+      URN_NODE_ID: "local:test",
+    },
+    encoding: "utf-8",
+  });
+
+  const rows = JSON.parse(output);
+  assert.equal(rows.some((row) => row.sourceApp === "claude"), true);
+  assert.equal(rows.some((row) => row.sourceApp === "chrome"), true);
+  assert.equal(rows.some((row) => row.sourceApp === "zsh"), false);
+});
+
+test("daily ingest profile can include shell history explicitly", () => {
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "urn-e2e-profile-shell-"));
+  const dbPath = path.join(tempHome, "urn.db");
+
+  fs.writeFileSync(
+    path.join(tempHome, ".zsh_history"),
+    ": 1776038400:0;git status\n",
+  );
+
+  execFileSync("node", [CLI_PATH, "ingest", "--profile", "daily", "--day", "2026-04-13", "--include-shell"], {
+    cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      HOME: tempHome,
+      URN_DB_PATH: dbPath,
+    },
+    encoding: "utf-8",
+  });
+
+  const output = execFileSync("node", [CLI_PATH, "query", "--day", "2026-04-13", "--format", "json"], {
+    cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      HOME: tempHome,
+      URN_DB_PATH: dbPath,
+    },
+    encoding: "utf-8",
+  });
+
+  const rows = JSON.parse(output);
+  assert.equal(rows.some((row) => row.sourceApp === "zsh"), true);
+});
+
+test("hourly sync uses cursors for agent sessions and replay windows for browser history", () => {
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "urn-e2e-sync-"));
+  const dbPath = path.join(tempHome, "urn.db");
+  const now = Date.now();
+  const sessionTime = new Date(now - 5 * 60 * 1000);
+  const browserTime = new Date(now - 30 * 60 * 1000);
+
+  const claudeFile = path.join(
+    tempHome,
+    ".claude",
+    "projects",
+    "-Users-test-sync",
+    "claude-session.jsonl",
+  );
+  writeFile(
+    claudeFile,
+    [
+      JSON.stringify({
+        type: "user",
+        message: { content: "sync prompt" },
+        timestamp: sessionTime.toISOString(),
+        cwd: "/Users/test/sync",
+      }),
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "text", text: "sync answer" }] },
+        timestamp: new Date(sessionTime.getTime() + 1000).toISOString(),
+        cwd: "/Users/test/sync",
+      }),
+      "",
+    ].join("\n"),
+  );
+  fs.utimesSync(claudeFile, sessionTime, sessionTime);
+
+  const chromeDb = path.join(
+    tempHome,
+    "Library",
+    "Application Support",
+    "Google",
+    "Chrome",
+    "Default",
+    "History",
+  );
+  sqlite(
+    chromeDb,
+    `
+      CREATE TABLE urls (id INTEGER PRIMARY KEY, url TEXT NOT NULL, title TEXT NOT NULL);
+      CREATE TABLE visits (id INTEGER PRIMARY KEY, url INTEGER NOT NULL, visit_time INTEGER NOT NULL);
+      INSERT INTO urls (id, url, title) VALUES (1, 'https://example.com/hourly', 'Hourly Page');
+      INSERT INTO visits (id, url, visit_time) VALUES (1, 1, ${toChromiumVisitTime(browserTime.toISOString())});
+    `,
+  );
+
+  const env = {
+    ...process.env,
+    HOME: tempHome,
+    AI_SESSION_VIEWER_HOME: tempHome,
+    URN_DB_PATH: dbPath,
+    URN_NODE_ID: "local:test",
+  };
+
+  const firstSync = JSON.parse(execFileSync("node", [CLI_PATH, "sync"], {
+    cwd: PROJECT_ROOT,
+    env,
+    encoding: "utf-8",
+  }));
+  const secondSync = JSON.parse(execFileSync("node", [CLI_PATH, "sync"], {
+    cwd: PROJECT_ROOT,
+    env,
+    encoding: "utf-8",
+  }));
+
+  const firstClaude = firstSync.batches.find((batch) => batch.label === "claude");
+  const secondClaude = secondSync.batches.find((batch) => batch.label === "claude");
+  const secondBrowser = secondSync.batches.find((batch) => batch.label === "browser-history");
+
+  assert.equal(firstSync.profile, "hourly");
+  assert.equal(firstClaude.result.rawRecordsInserted, 1);
+  assert.equal(secondClaude.result.rawRecordsInserted, 0);
+  assert.equal(secondBrowser.result.rawRecordsInserted, 0);
+  assert.equal(secondSync.batches.some((batch) => batch.label === "shell-history"), false);
+
+  const output = execFileSync("node", [CLI_PATH, "query", "--recent", "2d", "--format", "json"], {
+    cwd: PROJECT_ROOT,
+    env,
+    encoding: "utf-8",
+  });
+  const rows = JSON.parse(output);
+  assert.equal(rows.some((row) => row.sourceApp === "claude"), true);
+  assert.equal(rows.some((row) => row.sourceApp === "chrome"), true);
+});
+
+test("stats and summary expose aggregate and summary views", () => {
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "urn-e2e-summary-"));
+  const dbPath = path.join(tempHome, "urn.db");
+
+  const claudeFile = path.join(
+    tempHome,
+    ".claude",
+    "projects",
+    "-Users-test-summary",
+    "claude-session.jsonl",
+  );
+  writeFile(
+    claudeFile,
+    [
+      JSON.stringify({
+        type: "user",
+        message: { content: "summary prompt" },
+        timestamp: "2026-04-13T08:00:00.000Z",
+        cwd: "/Users/test/summary",
+      }),
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: "text", text: "summary answer" }] },
+        timestamp: "2026-04-13T08:00:10.000Z",
+        cwd: "/Users/test/summary",
+      }),
+      "",
+    ].join("\n"),
+  );
+  fs.utimesSync(claudeFile, new Date("2026-04-13T08:00:00.000Z"), new Date("2026-04-13T08:00:10.000Z"));
+
+  execFileSync("node", [CLI_PATH, "ingest", "--source", "claude", "--day", "2026-04-13"], {
+    cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      HOME: tempHome,
+      AI_SESSION_VIEWER_HOME: tempHome,
+      URN_DB_PATH: dbPath,
+    },
+    encoding: "utf-8",
+  });
+
+  const stats = JSON.parse(execFileSync("node", [CLI_PATH, "stats", "--day", "2026-04-13"], {
+    cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      HOME: tempHome,
+      AI_SESSION_VIEWER_HOME: tempHome,
+      URN_DB_PATH: dbPath,
+    },
+    encoding: "utf-8",
+  }));
+
+  const summary = JSON.parse(execFileSync("node", [CLI_PATH, "summary", "--day", "2026-04-13"], {
+    cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      HOME: tempHome,
+      AI_SESSION_VIEWER_HOME: tempHome,
+      URN_DB_PATH: dbPath,
+    },
+    encoding: "utf-8",
+  }));
+
+  assert.equal(stats.totalEvents, 2);
+  assert.equal(stats.totalRawRecords, 1);
+  assert.equal(stats.bySourceApp[0].key, "claude");
+  assert.equal(summary.totals.events, 2);
+  assert.equal(summary.topCwds[0].cwd, "/Users/test/summary");
+  assert.equal(summary.topTitles[0].title, "summary prompt");
+  assert.equal(summary.representativeEvents[0].content, "summary prompt");
 });

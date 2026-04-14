@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import type { FetchContext, SourceFetcher } from "../../core/types/fetch.js";
+import type { FetchContext, SourceFetcher, SyncContext, SyncCursor, SyncResult } from "../../core/types/fetch.js";
 import type { RawRecord } from "../../core/types/raw-record.js";
 import type { FetchWindow } from "../../core/types/query.js";
 import { stableHash } from "../../shared/hash.js";
@@ -107,6 +107,38 @@ function clipTitle(content: string, fallback: string): string {
   return (text || fallback).slice(0, 100);
 }
 
+function isRegularFile(filePath: string): boolean {
+  try {
+    return fs.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function createSyncBounds(cursor: SyncCursor | undefined, overlapMs: number): { start: Date; end: Date } {
+  const end = new Date();
+  const startMs = Math.max(0, (cursor?.updatedAt || 0) - overlapMs);
+  return {
+    start: new Date(startMs),
+    end,
+  };
+}
+
+function toSyncResult(
+  sessions: SessionRecord[],
+  context: FetchContext,
+  bounds: { start: Date; end: Date },
+): SyncResult {
+  const records = sessions.map((session) => sessionToRawRecord(session, context, bounds));
+  const nextCursor = sessions.reduce<SyncCursor>(
+    (current, session) => ({
+      updatedAt: Math.max(current.updatedAt || 0, session.updatedAt),
+    }),
+    { updatedAt: bounds.end.getTime() },
+  );
+  return { records, nextCursor };
+}
+
 function parseClaude(bounds: { start: Date; end: Date }): SessionRecord[] {
   const baseDir = process.env.AI_SESSION_VIEWER_CLAUDE_DIR || path.join(viewerHome(), ".claude", "projects");
   if (!fs.existsSync(baseDir)) {
@@ -125,6 +157,9 @@ function parseClaude(bounds: { start: Date; end: Date }): SessionRecord[] {
       }
       const filePath = path.join(projectDir, file);
       const stat = fs.statSync(filePath);
+      if (!stat.isFile()) {
+        continue;
+      }
       if (stat.mtime < bounds.start || stat.mtime > bounds.end) {
         continue;
       }
@@ -195,7 +230,7 @@ function parseCodex(bounds: { start: Date; end: Date }): SessionRecord[] {
       continue;
     }
     const [id = "", rolloutPath = "", title = "", cwd = "", updatedAt = "0", firstUserMessage = ""] = line.split(SEP);
-    if (!id || !rolloutPath || !fs.existsSync(rolloutPath)) {
+    if (!id || !rolloutPath || !isRegularFile(rolloutPath)) {
       continue;
     }
     const messages: SessionMessage[] = [];
@@ -522,12 +557,20 @@ export const agentSessionFetchers: SourceFetcher[] = [
       const bounds = getWindowBounds(window);
       return parseClaude(bounds).map((session) => sessionToRawRecord(session, context, bounds));
     },
+    sync(context: SyncContext): SyncResult {
+      const bounds = createSyncBounds(context.cursor, context.overlapMs);
+      return toSyncResult(parseClaude(bounds), context, bounds);
+    },
   },
   {
     definition: { id: "codex", type: "agent_session", app: "codex", title: "Codex Sessions" },
     fetch(window: FetchWindow, context: FetchContext): RawRecord[] {
       const bounds = getWindowBounds(window);
       return parseCodex(bounds).map((session) => sessionToRawRecord(session, context, bounds));
+    },
+    sync(context: SyncContext): SyncResult {
+      const bounds = createSyncBounds(context.cursor, context.overlapMs);
+      return toSyncResult(parseCodex(bounds), context, bounds);
     },
   },
   {
@@ -536,12 +579,20 @@ export const agentSessionFetchers: SourceFetcher[] = [
       const bounds = getWindowBounds(window);
       return parseOpenCode(bounds).map((session) => sessionToRawRecord(session, context, bounds));
     },
+    sync(context: SyncContext): SyncResult {
+      const bounds = createSyncBounds(context.cursor, context.overlapMs);
+      return toSyncResult(parseOpenCode(bounds), context, bounds);
+    },
   },
   {
     definition: { id: "alma", type: "agent_session", app: "alma", title: "Alma Sessions" },
     fetch(window: FetchWindow, context: FetchContext): RawRecord[] {
       const bounds = getWindowBounds(window);
       return parseAlma(bounds).map((session) => sessionToRawRecord(session, context, bounds));
+    },
+    sync(context: SyncContext): SyncResult {
+      const bounds = createSyncBounds(context.cursor, context.overlapMs);
+      return toSyncResult(parseAlma(bounds), context, bounds);
     },
   },
 ];

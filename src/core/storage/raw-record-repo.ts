@@ -4,7 +4,7 @@ import type { RawRecord } from "../types/raw-record.js";
 export class RawRecordRepo {
   constructor(private readonly db: Database.Database) {}
 
-  insertMany(records: RawRecord[]): number {
+  insertMany(records: RawRecord[]): RawRecord[] {
     const insert = this.db.prepare(`
       INSERT OR IGNORE INTO raw_records (
         id, node_id, source_type, source_app, occurred_at, fetched_at,
@@ -15,18 +15,21 @@ export class RawRecordRepo {
       )
     `);
 
+    const inserted: RawRecord[] = [];
     const transaction = this.db.transaction((items: RawRecord[]) => {
       for (const record of items) {
-        insert.run({
+        const result = insert.run({
           ...record,
           payloadJson: JSON.stringify(record.payload),
         });
+        if (result.changes > 0) {
+          inserted.push(record);
+        }
       }
     });
 
-    const before = this.count();
     transaction(records);
-    return this.count() - before;
+    return inserted;
   }
 
   count(): number {

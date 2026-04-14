@@ -34,13 +34,18 @@ export class IngestPipeline {
           fetchedAt,
         }),
       ),
-    ).map((record) => ({
+    );
+
+    return this.ingestRawRecords(rawRecords);
+  }
+
+  ingestRawRecords(rawRecords: ReturnType<typeof dedupeRawRecords>): IngestResult {
+    const preparedRawRecords = dedupeRawRecords(rawRecords).map((record) => ({
       ...record,
       payload: redactPayload(record.payload),
     }));
-
-    const events = dedupeEvents(rawRecords.flatMap((record) => normalizeRawRecord(record)));
-    const rawRecordsInserted = this.rawRecordRepo.insertMany(rawRecords);
+    const insertedRawRecords = this.rawRecordRepo.insertMany(preparedRawRecords);
+    const events = dedupeEvents(insertedRawRecords.flatMap((record) => normalizeRawRecord(record)));
     const eventsInserted = this.eventRepo.insertMany(events);
 
     this.db.prepare(`
@@ -49,8 +54,8 @@ export class IngestPipeline {
     `).run(this.nodeId, this.nodeId);
 
     return {
-      rawRecordsRead: rawRecords.length,
-      rawRecordsInserted,
+      rawRecordsRead: preparedRawRecords.length,
+      rawRecordsInserted: insertedRawRecords.length,
       eventsInserted,
     };
   }
