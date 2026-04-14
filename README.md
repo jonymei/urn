@@ -1,19 +1,39 @@
-# urn
+<p align="center">
+  <img src="./docs/assets/urn-icon.png" alt="urn icon" width="128" height="128">
+</p>
 
-`urn` 用来采集用户的日常工作行为，做统一脱敏、规范化、索引和查询，供上层 AI Agent 分析与汇总。
+<h1 align="center">urn</h1>
 
-当前首批数据源：
+<p align="center">
+  把散落在本机各处的工作痕迹收回来，炼成一份能查、能汇总、能喂给 Agent 的本地索引。
+</p>
 
-- AI Agent 会话
-- 浏览器历史
-- Shell 历史
+<p align="center">
+  <img alt="Agent Sources" src="https://img.shields.io/badge/Agent-Claude%20%7C%20Codex%20%7C%20OpenCode%20%7C%20Alma-4F46E5">
+  <img alt="Browser Sources" src="https://img.shields.io/badge/Browser-Safari%20%7C%20Chrome%20%7C%20Edge-0F766E">
+  <img alt="Shell Sources" src="https://img.shields.io/badge/Shell-Bash%20%7C%20Zsh%20%7C%20Fish-7C3AED">
+</p>
 
-当前特性：
+<p align="center"><em>人生苦短，每一个人都是演员。</em></p>
+
+`urn` 不是那种想把一切都解释清楚的“大平台”。`urn` 就是 Dota 里的 **Urn of Shadows**，收集英雄散掉的灵魂；而我们的灵魂，散在 Codex 的对话里，散在 Claude 的上下文里，散在浏览器一闪而过的标签页里，散在终端敲下又忘掉的命令里。一天过去，真正留下来的东西往往不是完整的叙事，只是一些碎片、一些残影、一些还带着温度的痕迹。`urn` 做的事，就是把这些东西收回来，洗一遍，炼一遍，存进本地。等你回头看，等 Agent 来问，等你想知道自己到底做过什么、查过什么、想过什么，它们还在，还能被重新唤醒，还能重新开口。
+
+## 它具体做什么
+
+当前 `urn` 主要提供四类能力：
+
+- 采集本地工作活动，覆盖 AI Agent 会话、浏览器历史、Shell 历史
+- 对原始记录做脱敏、规范化和去重，统一落到 SQLite
+- 按天、时间段或最近窗口查询事件，并导出为人类或机器友好的格式
+- 为上层 Agent 提供稳定的数据入口，用于回顾、统计、摘要和分析
+
+核心特性：
 
 - 本地优先，统一入库到 SQLite
 - 原始记录与规范化事件两层模型
-- 按天、任意时间段、最近 N 小时 / N 天查询
-- 规则型敏感信息脱敏
+- 支持按天、任意时间段、最近 N 小时 / N 天查询
+- 默认输出适合人类阅读，也支持 `json`、`jsonl`、`csv`、`tsv`
+- 内置规则型敏感信息脱敏
 - 为未来多节点聚合预留 `nodeId`
 
 ## 安装
@@ -24,14 +44,23 @@ pnpm install
 pnpm build
 ```
 
-如果要在本地直接调用：
+如果只是本地调试 CLI：
 
 ```bash
-pnpm link --global
-urn --help
+pnpm cli -- --help
 ```
 
 ## 用法
+
+最常见的几个入口：
+
+- `ingest`：手动补数、按天归档
+- `sync`：高频近实时同步
+- `query`：查明细
+- `stats`：看聚合分布
+- `summary`：看一段时间的摘要
+
+示例：
 
 ```bash
 urn ingest --source all --day 2026-04-14
