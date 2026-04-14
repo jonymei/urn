@@ -24,6 +24,13 @@ pnpm install
 pnpm build
 ```
 
+如果要在本地直接调用：
+
+```bash
+pnpm link --global
+urn --help
+```
+
 ## 用法
 
 ```bash
@@ -58,6 +65,23 @@ CLI 输出与格式约定见 [docs/cli-design.md](./docs/cli-design.md)。
 ```text
 ~/.urn/urn.db
 ```
+
+## Skills
+
+仓库内提供了一个面向 Agent 的 skill：
+
+- `skills/urn-cli`
+
+它的用途是约束 Agent 在分析本地工作行为时优先调用已安装的 `urn` CLI，而不是直接运行仓库里的开发入口。
+
+适用场景：
+
+- 查询某一天或某个时间段的活动记录
+- 汇总 `query` / `stats` / `summary` 的结果
+- 选择合适的 `--format`
+- 说明 `ingest` / `sync` / `sources list` / `nodes list` 的使用方式
+
+如果你的 Agent 支持从仓库加载 skill，可以直接引用 `skills/urn-cli/SKILL.md`。
 
 ## 配置
 
@@ -116,3 +140,18 @@ export AI_SESSION_VIEWER_ALMA_DB=/path/to/chat_threads.db
 - `bash`、`zsh` 没有时间戳的记录会被直接丢弃
 - `fish` 依赖历史文件中的 `when:` 时间戳
 - `cwd` 目前不会从历史文件中恢复；后续需要通过 shell hook 补齐
+
+## 开发
+
+```bash
+pnpm install
+pnpm build
+pnpm test
+```
+
+常用命令：
+
+- `pnpm build`：编译 TypeScript
+- `pnpm cli -- --help`：用仓库源码直接调试 CLI
+- `pnpm test:unit`：运行单元测试
+- `pnpm test:e2e`：运行 e2e 测试

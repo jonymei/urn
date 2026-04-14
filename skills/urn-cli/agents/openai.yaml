@@ -1,0 +1,4 @@
+interface:
+  display_name: "URN CLI"
+  short_description: "Inspect local activity with the urn CLI."
+  default_prompt: "Use $urn-cli to inspect local activity with the global urn command and choose an explicit --format that matches the task."
