@@ -2,7 +2,16 @@
   "name": "urn",
   "version": "0.1.0",
   "description": "Collect, normalize, redact, and query local work activity for AI agents",
+  "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jonymei/urn.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jonymei/urn/issues"
+  },
+  "homepage": "https://github.com/jonymei/urn#readme",
   "bin": {
     "urn": "src/bin/urn.js"
   },
