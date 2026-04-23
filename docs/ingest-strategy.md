@@ -24,7 +24,7 @@
 每天跑一次时，推荐：
 
 ```bash
-node dist/cli/index.js ingest --profile daily
+urn ingest --profile daily
 ```
 
 默认行为：
@@ -36,7 +36,7 @@ node dist/cli/index.js ingest --profile daily
 如果需要 shell 弱信号：
 
 ```bash
-node dist/cli/index.js ingest --profile daily --include-shell
+urn ingest --profile daily --include-shell
 ```
 
 ## 每小时同步
@@ -44,7 +44,7 @@ node dist/cli/index.js ingest --profile daily --include-shell
 如果目标是让索引尽量实时更新，同时控制重复成本，推荐：
 
 ```bash
-node dist/cli/index.js sync
+urn sync
 ```
 
 默认行为：
@@ -56,7 +56,7 @@ node dist/cli/index.js sync
 如果确实需要 shell：
 
 ```bash
-node dist/cli/index.js sync --include-shell
+urn sync --include-shell
 ```
 
 可调参数：

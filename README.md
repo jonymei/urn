@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Agent Sources" src="https://img.shields.io/badge/Agent-Claude%20%7C%20Codex%20%7C%20OpenCode%20%7C%20Alma-4F46E5">
+  <img alt="Agent Sources" src="https://img.shields.io/badge/Agent-Claude%20%7C%20Codex%20%7C%20OpenCode%20%7C%20Alma%20%7C%20Copilot-4F46E5">
   <img alt="Browser Sources" src="https://img.shields.io/badge/Browser-Safari%20%7C%20Chrome%20%7C%20Edge-0F766E">
   <img alt="Shell Sources" src="https://img.shields.io/badge/Shell-Bash%20%7C%20Zsh%20%7C%20Fish-7C3AED">
 </p>
@@ -80,11 +80,13 @@ pnpm cli -- --help
 ```bash
 urn ingest --source all --day 2026-04-14
 urn ingest --source zsh --recent 7d
+urn ingest --source copilot --day 2026-04-14
 urn ingest --profile daily
 urn ingest --profile daily --include-shell
 urn sync
 urn sync --include-shell
 urn query --source all --day 2026-04-14
+urn query --app copilot --day 2026-04-14
 urn stats --recent 30d
 urn summary --start 2026-04-11T00:00:00 --end 2026-04-12T23:59:59
 urn sync --format json
@@ -154,6 +156,7 @@ export AI_SESSION_VIEWER_CLAUDE_DIR=/path/to/claude/projects
 export AI_SESSION_VIEWER_CODEX_DB=/path/to/.codex/state_5.sqlite
 export AI_SESSION_VIEWER_OPENCODE_DB=/path/to/opencode.db
 export AI_SESSION_VIEWER_ALMA_DB=/path/to/chat_threads.db
+export AI_SESSION_VIEWER_COPILOT_WORKSPACE_STORAGE=/path/to/Code/User/workspaceStorage
 ```
 
 默认情况下会自动发现：
@@ -162,6 +165,7 @@ export AI_SESSION_VIEWER_ALMA_DB=/path/to/chat_threads.db
 - Codex: `~/.codex/state_5.sqlite`
 - OpenCode: 若干常见本地数据库位置
 - Alma: `~/Library/Application Support/alma/chat_threads.db`
+- GitHub Copilot Chat: `~/Library/Application Support/Code/User/workspaceStorage/*/chatSessions/*.jsonl`
 
 ### 浏览器历史数据源
 

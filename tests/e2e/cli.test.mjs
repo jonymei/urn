@@ -107,6 +107,58 @@ test("ingest and query merge agent sessions and shell history into normalized ev
     `,
   );
 
+  const copilotWorkspace = path.join(
+    tempHome,
+    "Library",
+    "Application Support",
+    "Code",
+    "User",
+    "workspaceStorage",
+    "workspace-1",
+  );
+  writeFile(
+    path.join(copilotWorkspace, "workspace.json"),
+    JSON.stringify({ folder: "file:///Users/test/copilot-project" }),
+  );
+  const copilotSession = path.join(copilotWorkspace, "chatSessions", "copilot-session.jsonl");
+  writeFile(
+    copilotSession,
+    [
+      JSON.stringify({
+        kind: 0,
+        v: {
+          version: 3,
+          creationDate: 1776047400000,
+          responderUsername: "GitHub Copilot",
+          sessionId: "copilot-session",
+          requests: [],
+          inputState: {
+            selectedModel: { identifier: "copilot/auto" },
+          },
+        },
+      }),
+      JSON.stringify({
+        kind: 2,
+        v: [
+          {
+            timestamp: 1776047400000,
+            agent: { fullName: "GitHub Copilot" },
+            message: { text: "Copilot request" },
+            result: {
+              metadata: {
+                toolCallRounds: [
+                  { response: "Copilot answer with ghp_1234567890abcdefghijkl" },
+                ],
+              },
+            },
+          },
+        ],
+      }),
+      "",
+    ].join("\n"),
+  );
+  fs.utimesSync(copilotSession, new Date("2026-04-13T02:30:00.000Z"), new Date("2026-04-13T02:31:00.000Z"));
+
   execFileSync("node", [CLI_PATH, "ingest", "--source", "all", "--day", "2026-04-13"], {
     cwd: PROJECT_ROOT,
     env: {
@@ -141,13 +193,17 @@ test("ingest and query merge agent sessions and shell history into normalized ev
   });
 
   const rows = JSON.parse(output);
-  assert.equal(rows.length, 6);
+  assert.equal(rows.length, 8);
   assert.equal(rows.some((row) => row.sourceApp === "claude"), true);
   assert.equal(rows.some((row) => row.sourceApp === "codex"), true);
+  assert.equal(rows.some((row) => row.sourceApp === "copilot"), true);
   assert.equal(rows.some((row) => row.sourceApp === "zsh"), true);
   const claudePrompt = rows.find((row) => row.sourceApp === "claude" && row.actor === "user");
   assert.match(claudePrompt.contentRedacted, /\*\*\*\*/);
   assert.equal(claudePrompt.cwd, "/Users/test/demo");
+  const copilotAnswer = rows.find((row) => row.sourceApp === "copilot" && row.actor === "agent");
+  assert.match(copilotAnswer.contentRedacted, /\*\*\*\*/);
+  assert.equal(copilotAnswer.cwd, "/Users/test/copilot-project");
 });
 
 test("query supports jsonl and csv output", () => {

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import type { FetchContext, SourceFetcher, SyncContext, SyncCursor, SyncResult } from "../../core/types/fetch.js";
 import type { RawRecord } from "../../core/types/raw-record.js";
 import type { FetchWindow } from "../../core/types/query.js";
@@ -512,6 +513,183 @@ function parseAlma(bounds: { start: Date; end: Date }): SessionRecord[] {
   return sessions;
 }
 
+function copilotWorkspaceStorageRoot(): string {
+  return process.env.AI_SESSION_VIEWER_COPILOT_WORKSPACE_STORAGE
+    || path.join(viewerHome(), "Library", "Application Support", "Code", "User", "workspaceStorage");
+}
+
+function workspacePathFromStorageDir(storageDir: string): string | null {
+  const workspaceFile = path.join(storageDir, "workspace.json");
+  if (!fs.existsSync(workspaceFile)) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(workspaceFile, "utf-8")) as Record<string, unknown>;
+    const uri = typeof parsed.folder === "string"
+      ? parsed.folder
+      : typeof parsed.workspace === "string"
+        ? parsed.workspace
+        : "";
+    if (!uri) {
+      return null;
+    }
+    return uri.startsWith("file://") ? fileURLToPath(uri) : uri;
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeCopilotText(value: string): string {
+  return value
+    .replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g, "[image]")
+    .replace(/\r?\n/g, "\n")
+    .trim();
+}
+
+function maybeText(value: unknown): string {
+  return typeof value === "string" ? sanitizeCopilotText(value) : "";
+}
+
+function copilotTimestamp(value: unknown, fallback: number): number {
+  return toTimestamp(value, fallback);
+}
+
+function collectCopilotMessages(value: unknown, messages: SessionMessage[], fallbackTimestamp: number): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectCopilotMessages(item, messages, fallbackTimestamp);
+    }
+    return;
+  }
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  const entry = value as Record<string, unknown>;
+  const timestamp = copilotTimestamp(entry.timestamp ?? entry.completedAt, fallbackTimestamp);
+  const request = entry.request && typeof entry.request === "object"
+    ? entry.request as Record<string, unknown>
+    : undefined;
+  const message = entry.message && typeof entry.message === "object"
+    ? entry.message as Record<string, unknown>
+    : undefined;
+  const requestMessage = request?.message && typeof request.message === "object"
+    ? request.message as Record<string, unknown>
+    : undefined;
+
+  pushMessage(messages, "user", maybeText(message?.text), timestamp);
+  pushMessage(messages, "user", maybeText(requestMessage?.text), timestamp);
+
+  const metadataCandidates = [
+    entry.metadata,
+    entry.result && typeof entry.result === "object"
+      ? (entry.result as Record<string, unknown>).metadata
+      : undefined,
+  ];
+  for (const metadata of metadataCandidates) {
+    if (!metadata || typeof metadata !== "object") {
+      continue;
+    }
+    const rounds = (metadata as Record<string, unknown>).toolCallRounds;
+    if (!Array.isArray(rounds)) {
+      continue;
+    }
+    for (const round of rounds) {
+      if (!round || typeof round !== "object") {
+        continue;
+      }
+      pushMessage(messages, "assistant", maybeText((round as Record<string, unknown>).response), timestamp);
+    }
+  }
+
+  for (const nested of Object.values(entry)) {
+    if (nested === entry.metadata || nested === entry.result || nested === entry.message || nested === entry.request) {
+      continue;
+    }
+    collectCopilotMessages(nested, messages, fallbackTimestamp);
+  }
+}
+
+function dedupeAndSortMessages(messages: SessionMessage[]): SessionMessage[] {
+  const seen = new Set<string>();
+  return messages
+    .sort((a, b) => a.timestamp - b.timestamp)
+    .filter((message) => {
+      const key = `${message.role}\0${message.timestamp}\0${message.content}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+}
+
+function parseCopilot(bounds: { start: Date; end: Date }): SessionRecord[] {
+  const root = copilotWorkspaceStorageRoot();
+  if (!fs.existsSync(root)) {
+    return [];
+  }
+
+  const sessions: SessionRecord[] = [];
+  for (const workspaceEntry of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!workspaceEntry.isDirectory()) {
+      continue;
+    }
+    const workspaceDir = path.join(root, workspaceEntry.name);
+    const chatDir = path.join(workspaceDir, "chatSessions");
+    if (!fs.existsSync(chatDir)) {
+      continue;
+    }
+    const cwd = workspacePathFromStorageDir(workspaceDir);
+    for (const file of fs.readdirSync(chatDir)) {
+      if (!file.endsWith(".jsonl")) {
+        continue;
+      }
+      const filePath = path.join(chatDir, file);
+      const stat = fs.statSync(filePath);
+      if (!stat.isFile()) {
+        continue;
+      }
+      if (stat.mtime < bounds.start || stat.mtime > bounds.end) {
+        continue;
+      }
+
+      const messages: SessionMessage[] = [];
+      let title = "";
+      let createdAt = stat.mtimeMs;
+      for (const line of fs.readFileSync(filePath, "utf-8").split("\n")) {
+        if (!line.trim()) {
+          continue;
+        }
+        try {
+          const entry = JSON.parse(line) as Record<string, unknown>;
+          if (entry.kind === 0 && entry.v && typeof entry.v === "object") {
+            const header = entry.v as Record<string, unknown>;
+            title = typeof header.title === "string" ? header.title : title;
+            createdAt = toTimestamp(header.creationDate, createdAt);
+          }
+          collectCopilotMessages(entry.v, messages, createdAt);
+        } catch {
+          continue;
+        }
+      }
+      const sortedMessages = dedupeAndSortMessages(messages);
+      if (sortedMessages.length === 0) {
+        continue;
+      }
+      sessions.push({
+        id: file.replace(/\.jsonl$/, ""),
+        tool: "copilot",
+        title: clipTitle(title || sortedMessages.find((message) => message.role === "user")?.content || "", file),
+        cwd,
+        updatedAt: stat.mtimeMs,
+        messages: sortedMessages,
+      });
+    }
+  }
+  return sessions;
+}
+
 function sessionToRawRecord(
   session: SessionRecord,
   context: FetchContext,
@@ -593,6 +771,17 @@ export const agentSessionFetchers: SourceFetcher[] = [
     sync(context: SyncContext): SyncResult {
       const bounds = createSyncBounds(context.cursor, context.overlapMs);
       return toSyncResult(parseAlma(bounds), context, bounds);
+    },
+  },
+  {
+    definition: { id: "copilot", type: "agent_session", app: "copilot", title: "GitHub Copilot Chat Sessions" },
+    fetch(window: FetchWindow, context: FetchContext): RawRecord[] {
+      const bounds = getWindowBounds(window);
+      return parseCopilot(bounds).map((session) => sessionToRawRecord(session, context, bounds));
+    },
+    sync(context: SyncContext): SyncResult {
+      const bounds = createSyncBounds(context.cursor, context.overlapMs);
+      return toSyncResult(parseCopilot(bounds), context, bounds);
     },
   },
 ];
